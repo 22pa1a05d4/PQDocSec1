@@ -1,5 +1,5 @@
 export const LOCAL_API =
-  import.meta.env.VITE_LOCAL_API || "http://localhost:5000";
+  import.meta.env.VITE_LOCAL_API || "http://localhost:5050";
 
 // Peer API will be discovered dynamically
 export let PEER_API = null;
