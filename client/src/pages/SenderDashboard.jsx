@@ -1,7 +1,6 @@
-import { useState } from "react";
-
-// NOTE: Replace these with your actual imports:
-import { localPost } from "../services/api";
+import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
+import { localPost, localGet } from "../services/api";
 import { setPeerApi, setSelfName } from "../config/api";
 
 export default function SenderDashboard() {
@@ -9,6 +8,8 @@ export default function SenderDashboard() {
   const [name, setName] = useState("");
   const [receiver, setReceiver] = useState(null);
   const [error, setError] = useState(null);
+  const pollIntervalRef = useRef(null);
+  const navigate = useNavigate();
 
   const startSender = () => {
     if (name.trim()) {
@@ -24,12 +25,10 @@ export default function SenderDashboard() {
     try {
       const res = await localPost("/sender/discover");
       
-      // Validate response before setting peer API
       if (!res.receiver_ip || !res.receiver_port) {
         throw new Error("Invalid receiver data: missing IP or port");
       }
       
-      // Only set peer API if both values are valid
       setPeerApi(res.receiver_ip, res.receiver_port, res.receiver_name);
       console.log("Set peer API to:", res.receiver_ip, res.receiver_port, res.receiver_name);
       
@@ -47,11 +46,17 @@ export default function SenderDashboard() {
     setError(null);
     
     try {
-      // Call your actual handshake API here
-      // const result = await peerPost("/handshake", { ... });
+      const result = await localPost("/sender/handshake", {
+        receiver_ip: receiver.receiver_ip,
+        receiver_port: receiver.receiver_port,
+        sender_name: name
+      });
       
-      // Simulating handshake for now
-      setTimeout(() => setState("READY"), 1500);
+      console.log("Handshake sent:", result);
+      setState("WAITING_ACK");
+      
+      // Start polling for acknowledgment
+      pollForAcknowledgment();
     } catch (err) {
       console.error("Handshake failed:", err);
       setState("ERROR");
@@ -59,11 +64,53 @@ export default function SenderDashboard() {
     }
   };
 
+  const pollForAcknowledgment = () => {
+    let timeoutId;
+    
+    pollIntervalRef.current = setInterval(async () => {
+      try {
+        const status = await localGet("/sender/ack_status");
+        
+        if (status.status === "ACKNOWLEDGED") {
+          clearInterval(pollIntervalRef.current);
+          clearTimeout(timeoutId);
+          
+          setState("READY");
+          
+          // Navigate to upload page after a brief moment
+          setTimeout(() => {
+            navigate("/upload-file");
+          }, 1500);
+        }
+      } catch (err) {
+        console.error("Polling acknowledgment error:", err);
+      }
+    }, 1000);
+    
+    // Timeout after 30 seconds
+    timeoutId = setTimeout(() => {
+      clearInterval(pollIntervalRef.current);
+      if (state === "WAITING_ACK") {
+        setState("ERROR");
+        setError("Receiver did not acknowledge connection");
+      }
+    }, 30000);
+  };
+
   const retry = () => {
     setError(null);
     setReceiver(null);
     setState("INIT");
   };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center">
@@ -95,7 +142,7 @@ export default function SenderDashboard() {
             {/* Grid */}
             <div className="absolute inset-0 rounded-full border border-emerald-700 opacity-30" />
 
-            {/* Pulsing rings */}
+            {/* Pulsing rings for SEARCHING */}
             {state === "SEARCHING" && (
               <>
                 <div className="absolute inset-0 rounded-full border-2 border-emerald-500 animate-ping opacity-20" />
@@ -104,33 +151,72 @@ export default function SenderDashboard() {
               </>
             )}
 
-            {/* Sweep */}
+            {/* Sweep for SEARCHING */}
             {state === "SEARCHING" && (
               <div className="absolute inset-0 origin-center animate-spin-slow">
                 <div className="absolute top-1/2 left-1/2 w-1/2 h-1 bg-gradient-to-r from-emerald-400 to-transparent" />
               </div>
             )}
 
-            {/* Receiver dot */}
+            {/* Receiver dot for FOUND */}
             {state === "FOUND" && (
               <button
                 onClick={handshake}
                 disabled={state === "HANDSHAKING" || state === "READY"}
                 className="absolute top-[30%] left-[65%] flex flex-col items-center group"
               >
-                {/* Avatar */}
                 <div className="w-14 h-14 rounded-full bg-emerald-500 flex items-center justify-center shadow-lg group-hover:scale-105 transition">
                   <span className="text-xl">👤</span>
                 </div>
-
-                {/* Name */}
                 <span className="mt-2 text-sm text-emerald-300">
                   {receiver?.receiver_name || "Receiver"}
                 </span>
               </button>
             )}
 
-            {/* Center */}
+            {/* Connection Bridge Animation for WAITING_ACK */}
+            {state === "WAITING_ACK" && (
+              <>
+                {/* Sender (left side) */}
+                <div className="absolute top-1/2 left-[15%] -translate-y-1/2 flex flex-col items-center">
+                  <div className="w-12 h-12 rounded-full bg-indigo-500 flex items-center justify-center shadow-lg">
+                    <span className="text-lg">📱</span>
+                  </div>
+                  <span className="mt-1 text-xs text-indigo-300">You</span>
+                </div>
+
+                {/* Receiver (right side) */}
+                <div className="absolute top-1/2 right-[15%] -translate-y-1/2 flex flex-col items-center">
+                  <div className="w-12 h-12 rounded-full bg-emerald-500 flex items-center justify-center shadow-lg">
+                    <span className="text-lg">💻</span>
+                  </div>
+                  <span className="mt-1 text-xs text-emerald-300">
+                    {receiver?.receiver_name}
+                  </span>
+                </div>
+
+                {/* Animated connection particles */}
+                <div className="absolute top-1/2 left-[25%] right-[25%] h-0.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-500 opacity-50" />
+                
+                {/* Traveling particles */}
+                <div className="absolute top-1/2 left-[25%] w-3 h-3 bg-indigo-400 rounded-full animate-travel-right" />
+                <div className="absolute top-1/2 right-[25%] w-3 h-3 bg-emerald-400 rounded-full animate-travel-left" />
+                
+                {/* Pulse effect */}
+                <div className="absolute inset-0 border-2 border-purple-500 rounded-full animate-pulse opacity-20" />
+              </>
+            )}
+
+            {/* Success checkmark for READY */}
+            {state === "READY" && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="w-20 h-20 rounded-full bg-emerald-500 flex items-center justify-center shadow-xl animate-scale-in">
+                  <span className="text-4xl">✓</span>
+                </div>
+              </div>
+            )}
+
+            {/* Center dot */}
             <div className="absolute inset-1/2 w-3 h-3 bg-emerald-400 rounded-full -translate-x-1/2 -translate-y-1/2" />
           </div>
 
@@ -159,14 +245,30 @@ export default function SenderDashboard() {
 
             {state === "HANDSHAKING" && (
               <p className="text-indigo-400 animate-pulse">
-                Establishing secure handshake…
+                Sending connection request…
               </p>
             )}
 
+            {state === "WAITING_ACK" && (
+              <div className="space-y-2">
+                <p className="text-purple-400 font-semibold animate-pulse">
+                  Waiting for receiver to accept…
+                </p>
+                <p className="text-sm text-slate-400">
+                  {receiver?.receiver_name} needs to confirm the connection
+                </p>
+              </div>
+            )}
+
             {state === "READY" && (
-              <p className="text-green-400 font-bold text-lg">
-                Secure channel established ✔
-              </p>
+              <div className="space-y-2">
+                <p className="text-green-400 font-bold text-lg">
+                  Connection established! ✔
+                </p>
+                <p className="text-sm text-slate-400">
+                  Redirecting to upload...
+                </p>
+              </div>
             )}
 
             {state === "ERROR" && (

@@ -11,12 +11,12 @@ def create_app():
     
     from .routes.file_routes import file_bp
     from .routes.health_routes import health_bp
-    #from app.routes.handshake_routes import handshake_bp
+    from app.routes.handshake_routes import handshake_bp
     from app.routes.control_routes import control_bp
     
     app.register_blueprint(file_bp)
     app.register_blueprint(health_bp)
-    #app.register_blueprint(handshake_bp)
+    app.register_blueprint(handshake_bp)
     app.register_blueprint(control_bp)
 
     return app
